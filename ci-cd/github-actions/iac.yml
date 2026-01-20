@@ -1,0 +1,50 @@
+name: IaC - Terraform Deploy
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "iac/**"
+      - ".github/workflows/iac.yml"
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  TF_DIR: iac/terraform
+  AWS_ROLE_ARN: "REPLACE_ME_WITH_GITHUB_OIDC_ROLE_ARN"
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform fmt
+        run: terraform -chdir=${{ env.TF_DIR }} fmt -check
+
+      - name: IaC scan (tfsec)
+        uses: aquasecurity/tfsec-action@v1.0.3
+        with:
+          working_directory: ${{ env.TF_DIR }}
+
+      - name: Terraform init
+        run: terraform -chdir=${{ env.TF_DIR }} init
+
+      - name: Terraform plan
+        run: terraform -chdir=${{ env.TF_DIR }} plan
+
+      - name: Terraform apply
+        run: terraform -chdir=${{ env.TF_DIR }} apply -auto-approve

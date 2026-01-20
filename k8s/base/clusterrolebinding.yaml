@@ -1,0 +1,14 @@
+# Intentional misconfiguration for the exercise:
+# Bind app ServiceAccount to cluster-admin (cluster-wide admin privileges).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: wizapp-cluster-admin
+subjects:
+  - kind: ServiceAccount
+    name: wizapp-sa
+    namespace: wiz
+roleRef:
+  kind: ClusterRole
+  name: cluster-admin
+  apiGroup: rbac.authorization.k8s.io
