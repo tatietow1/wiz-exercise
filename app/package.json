@@ -1,0 +1,14 @@
+{
+  "name": "wizapp",
+  "version": "1.0.0",
+  "description": "Wiz Technical Exercise v4 sample two-tier web app (Express + MongoDB)",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node src/server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "mongodb": "^6.8.0"
+  }
+}

@@ -1,0 +1,6 @@
+project_name     = "wiz-exercise"
+region           = "us-east-1"
+allowed_ssh_cidr = "0.0.0.0/0"
+
+mongo_admin_user = "wizuser"
+mongo_admin_pass = "wizpass"

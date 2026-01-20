@@ -1,0 +1,76 @@
+#!/bin/bash
+set -e
+
+export DEBIAN_FRONTEND=noninteractive
+
+# Basic updates (intentionally not hardening; exercise focus)
+apt-get update -y
+apt-get install -y curl gnupg ca-certificates lsb-release cron awscli
+
+# Install MongoDB 5.0 (older version for exercise)
+curl -fsSL https://pgp.mongodb.com/server-5.0.asc | gpg --dearmor -o /usr/share/keyrings/mongodb-server-5.0.gpg
+echo "deb [ signed-by=/usr/share/keyrings/mongodb-server-5.0.gpg ] https://repo.mongodb.org/apt/ubuntu focal/mongodb-org/5.0 multiverse" | tee /etc/apt/sources.list.d/mongodb-org-5.0.list
+
+apt-get update -y
+apt-get install -y mongodb-org=5.0.26 mongodb-org-server=5.0.26 mongodb-org-shell=5.0.26 mongodb-org-mongos=5.0.26 mongodb-org-tools=5.0.26 || apt-get install -y mongodb-org
+
+# Configure mongod: bind to all interfaces BUT security group restricts access to EKS only
+# Auth enabled
+cat >/etc/mongod.conf <<EOF
+storage:
+  dbPath: /var/lib/mongodb
+systemLog:
+  destination: file
+  logAppend: true
+  path: /var/log/mongodb/mongod.log
+net:
+  port: 27017
+  bindIp: 0.0.0.0
+processManagement:
+  timeZoneInfo: /usr/share/zoneinfo
+security:
+  authorization: enabled
+EOF
+
+systemctl enable mongod
+systemctl restart mongod
+
+# Create admin user
+sleep 5
+mongosh --eval "db.getSiblingDB('admin').createUser({user: '${mongo_admin_user}', pwd: '${mongo_admin_pass}', roles: [ { role: 'root', db: 'admin' } ]})" || true
+
+# Create application DB/collection
+mongosh "mongodb://${mongo_admin_user}:${mongo_admin_pass}@localhost:27017/admin" --eval "db.getSiblingDB('wizdb').createCollection('items')" || true
+
+# Daily backup script (uploads to S3). Bucket is intentionally public list/read via Terraform policy.
+cat >/usr/local/bin/mongo_backup.sh <<'EOS'
+#!/bin/bash
+set -euo pipefail
+
+TS=$(date -u +%Y-%m-%dT%H-%M-%SZ)
+OUT="/tmp/mongo-backup-$TS.archive.gz"
+
+mongodump --archive --gzip --username "${mongo_admin_user}" --password "${mongo_admin_pass}" --authenticationDatabase admin > "$OUT"
+
+aws s3 cp "$OUT" "s3://${s3_bucket_name}/$TS.archive.gz" --region "${region}"
+
+rm -f "$OUT"
+EOS
+
+chmod +x /usr/local/bin/mongo_backup.sh
+
+# Write env vars into script
+sed -i "s|\${mongo_admin_user}|${mongo_admin_user}|g" /usr/local/bin/mongo_backup.sh
+sed -i "s|\${mongo_admin_pass}|${mongo_admin_pass}|g" /usr/local/bin/mongo_backup.sh
+sed -i "s|\${s3_bucket_name}|${s3_bucket_name}|g" /usr/local/bin/mongo_backup.sh
+sed -i "s|\${region}|${region}|g" /usr/local/bin/mongo_backup.sh
+
+# Cron job: daily at 01:15 UTC
+cat >/etc/cron.d/mongo_backup <<EOF
+15 1 * * * root /usr/local/bin/mongo_backup.sh >> /var/log/mongo_backup.log 2>&1
+EOF
+
+chmod 0644 /etc/cron.d/mongo_backup
+systemctl restart cron
+
+echo "MongoDB setup complete."
